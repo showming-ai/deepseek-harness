@@ -743,12 +743,36 @@ function normalizeShippedProfile(name: string, dir: string, manifest: ProfileMan
 }
 
 /**
+ * Return a reachable directory equivalent to `candidate`, or `undefined` when
+ * `candidate/package.json` does not exist. `existsSync`/`statSync` can report
+ * a false negative on Windows for a relative-target symlink reached through a
+ * preceding directory junction (e.g. a profile-local bundle link hopping into
+ * a pnpm-isolated package's own relative sibling symlinks): the junction hop
+ * resolves, but the OS fails the subsequent symlink-follow in the same walk.
+ * `realpathSync` resolves each reparse point individually and succeeds where
+ * the combined follow does not, so its result — not the original candidate,
+ * which a plain `readFileSync` would fail on the same way — is the fallback
+ * once the fast path reports absence.
+ */
+function reachableCandidateDir(candidate: string): string | undefined {
+  if (existsSync(join(candidate, 'package.json'))) return candidate
+  try {
+    // The plain (non-native) implementation walks and resolves each path
+    // component's reparse point individually; `realpathSync.native` hits the
+    // same combined-follow failure as `existsSync` and cannot be used here.
+    const resolved = realpathSync(candidate)
+    return existsSync(join(resolved, 'package.json')) ? resolved : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Resolve a package's root directory from one anchor without depending on the
  * package exporting `./package.json` (`require.resolve` would need that):
  * probe the require resolution paths for a directory holding the named
  * manifest. This is Node's own node_modules lookup order, so the result
- * matches what the Loader would import from the same anchor, and
- * `existsSync` follows the symlinks pnpm's isolated layout uses.
+ * matches what the Loader would import from the same anchor.
  */
 function packageDirFromAnchor(
   anchor: string, packageName: string,
@@ -757,8 +781,8 @@ function packageDirFromAnchor(
   // resolve.paths returns null only for builtins, which no bundle name is.
   /* v8 ignore next */
   for (const searchPath of createRequire(anchor).resolve.paths(packageName) ?? []) {
-    const candidate = join(searchPath, packageName)
-    if (existsSync(join(candidate, 'package.json')) && !exclude(candidate, packageName)) return candidate
+    const resolved = reachableCandidateDir(join(searchPath, packageName))
+    if (resolved !== undefined && !exclude(resolved, packageName)) return resolved
   }
   return undefined
 }

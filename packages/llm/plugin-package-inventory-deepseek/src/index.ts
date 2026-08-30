@@ -5,7 +5,7 @@
  * @module @deepseek-ai/dsh-plugin-package-inventory-deepseek
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, parse } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -67,6 +67,31 @@ function identityFromManifest(path: string, allowAnonymous: boolean): DeepSeekPl
   return { name: manifest.name, version: manifest.version }
 }
 
+/**
+ * Return a reachable manifest path equivalent to `candidate`, or `undefined`
+ * when it does not exist. `existsSync` can report a false negative on
+ * Windows for a relative-target symlink reached through a preceding
+ * directory junction (a profile-local bundle link hopping into a
+ * pnpm-isolated package's own relative sibling symlinks): the junction hop
+ * resolves, but the OS fails the subsequent symlink-follow in the same walk.
+ * `realpathSync` resolves each reparse point individually and succeeds where
+ * the combined follow does not, so its result — not the original candidate,
+ * which a plain `readFileSync` would fail on the same way — is the fallback
+ * once the fast path reports absence.
+ */
+function reachableManifestPath(candidate: string): string | undefined {
+  if (existsSync(candidate)) return candidate
+  try {
+    // The plain (non-native) implementation walks and resolves each path
+    // component's reparse point individually; `realpathSync.native` hits the
+    // same combined-follow failure as `existsSync` and cannot be used here.
+    const resolved = realpathSync(candidate)
+    return existsSync(resolved) ? resolved : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Resolve a bare package without requiring it to export `./package.json`. */
 function barePackageManifest(packageName: string, anchors: readonly string[]): string | undefined {
   for (const anchor of anchors) {
@@ -74,8 +99,8 @@ function barePackageManifest(packageName: string, anchors: readonly string[]): s
     /* v8 ignore next -- active non-builtin package entries always have Node package search paths */
     if (searchPaths === null) continue
     for (const searchPath of searchPaths) {
-      const manifest = join(searchPath, packageName, 'package.json')
-      if (existsSync(manifest)) return manifest
+      const manifest = reachableManifestPath(join(searchPath, packageName, 'package.json'))
+      if (manifest !== undefined) return manifest
     }
   }
   return undefined
