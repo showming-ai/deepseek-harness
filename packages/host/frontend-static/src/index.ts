@@ -84,11 +84,13 @@ export async function serveStatic(
   }
   let body: string | Buffer
   let type: string
+  let isIndex = false
   try {
     if (target === distRoot || target === distIndex) {
       if (!authorizeIndex()) return
       body = await renderIndex()
       type = HTML_MIME
+      isIndex = true
     } else {
       body = await readFile(target)
       type = MIME[extname(target)] ?? 'application/octet-stream'
@@ -101,7 +103,11 @@ export async function serveStatic(
     res.end()
     return
   }
-  res.writeHead(200, { 'content-type': type })
+  // The index embeds a rev-pinned boot graph; a cached copy from a previous
+  // build points at revisions the current server 404s, breaking client-module
+  // preload. Every other asset is fine to cache — an unhashed one (e.g.
+  // favicon.svg) just goes stale until the next reload, which self-heals.
+  res.writeHead(200, isIndex ? { 'content-type': type, 'cache-control': 'no-store' } : { 'content-type': type })
   res.end(body)
 }
 
