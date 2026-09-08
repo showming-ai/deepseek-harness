@@ -175,10 +175,24 @@ export class HostConnectionService extends Service implements HostConnectionHand
         await bridge(req, res, fetchHandler)
       },
     }
-    return owner.effect(
-      () => owner.webServer.register(route),
-      `client-connection: ${channel} rpc channel`,
-    )
+    // `owner` only declares `credentials`; reading `webServer` through a plain
+    // property access throws whenever a dependent activates before the Host
+    // webserver plugin does. `get` resolves the same service without that
+    // ordering requirement, so the common case still registers synchronously.
+    const webServer = owner.get('webServer')
+    if (webServer) {
+      return owner.effect(
+        () => webServer.register(route),
+        `client-connection: ${channel} rpc channel`,
+      )
+    }
+    const fiber = owner.inject(['webServer'], (webCtx) => {
+      webCtx.effect(
+        () => webCtx.webServer.register(route),
+        `client-connection: ${channel} rpc channel`,
+      )
+    })
+    return () => fiber.dispose()
   }
 
   private registerInterceptor(
