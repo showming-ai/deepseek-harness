@@ -15,9 +15,13 @@ Write-Host ""
 # 1. 檢查 Node.js
 try {
     $nodeVer = & node -v
+    if ($LASTEXITCODE -ne 0) {
+        throw "node -v failed with exit code $LASTEXITCODE."
+    }
     Write-Host "[✓] Node.js 版本: $nodeVer" -ForegroundColor Green
 } catch {
-    Write-Host "[錯誤] 找不到 Node.js，請先安裝 Node.js (>= 22.19.0)。" -ForegroundColor Red
+    Write-Host "[錯誤] Node.js 無法正常執行，請先修復或安裝 Node.js (>= 22.19.0)。" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor DarkRed
     Write-Host "下載網址: https://nodejs.org/" -ForegroundColor Yellow
     Read-Host "請按 Enter 鍵結束..."
     exit 1
@@ -26,15 +30,15 @@ try {
 # 2. 檢查 pnpm
 try {
     $pnpmVer = & pnpm -v
+    if ($LASTEXITCODE -ne 0) {
+        throw "pnpm -v failed with exit code $LASTEXITCODE."
+    }
     Write-Host "[✓] pnpm 版本: $pnpmVer" -ForegroundColor Green
 } catch {
-    Write-Host "[提示] 找不到 pnpm，正在嘗試安裝 pnpm..." -ForegroundColor Yellow
-    npm install -g pnpm
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[錯誤] pnpm 安裝失敗，請手動執行: npm install -g pnpm" -ForegroundColor Red
-        Read-Host "請按 Enter 鍵結束..."
-        exit 1
-    }
+    Write-Host "[錯誤] pnpm 無法正常執行，請先修復 Node.js / pnpm 安裝。" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor DarkRed
+    Read-Host "請按 Enter 鍵結束..."
+    exit 1
 }
 
 # 3. 檢查編譯產物是否齊全
@@ -82,8 +86,16 @@ if ($LASTEXITCODE -ne 0) {
     if ($choice -eq 'Y' -or $choice -eq 'y') {
         Write-Host "正在執行 pnpm install..." -ForegroundColor Yellow
         & pnpm install
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[錯誤] 依賴安裝失敗，未繼續編譯或重新啟動。" -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
         Write-Host "正在執行 pnpm run build..." -ForegroundColor Yellow
         & pnpm run build
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[錯誤] 專案編譯失敗，未重新啟動。" -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
         Write-Host "重新啟動中..." -ForegroundColor Cyan
         & pnpm dsh web
     }
